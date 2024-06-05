@@ -49,6 +49,7 @@ def retry(max_retry_count, interval_sec):
                         log.info(f'Retrying {func.__name__} in {interval_sec} seconds...')
                         time.sleep(interval_sec)
             log.warning(f'{func.__name__} reached maximum retry count of {max_retry_count}.')
+            raise Exception(e)
         return wrapper
     return decorator
 
@@ -186,37 +187,52 @@ class FastPeoplesearch:
 
 
 def process_row(row, result_excel_file_path, log: logging):
-    log.info(f"Scraping for:\n{row}")
-    usps = Usps(zip=row["ZIP"], log=log)
-    cities = usps.get_city_from_zipcode()
-    rows = []
-    for city in cities:
-        city = city.split(" ")
-        city, dist = ' '.join(city[:-1]), city[-1]
-        fastpeoplesearch = FastPeoplesearch(
-            first_name=row["FIRST_NAME"],
-            last_name=row["LAST_NAME"],
-            street=row["STREET"],
-            city=city,
-            dist=dist,
-            zip=str(row["ZIP"]),
-            log=log
-        )
-        emails = fastpeoplesearch.fastpeoplesearch_manager()
+    try:
+        log.info(f"Scraping for:\n{row}")
+        usps = Usps(zip=row["ZIP"], log=log)
+        cities = usps.get_city_from_zipcode()
+        rows = []
+        for city in cities:
+            city = city.split(" ")
+            city, dist = ' '.join(city[:-1]), city[-1]
+            fastpeoplesearch = FastPeoplesearch(
+                first_name=row["FIRST_NAME"],
+                last_name=row["LAST_NAME"],
+                street=row["STREET"],
+                city=city,
+                dist=dist,
+                zip=str(row["ZIP"]),
+                log=log
+            )
+            emails = fastpeoplesearch.fastpeoplesearch_manager()
+            new_row = {
+            "FIRST_NAME": row["FIRST_NAME"],
+            "LAST_NAME": row["LAST_NAME"],
+            "STREET": row["STREET"],
+            "CITY": city,
+            "DIST": dist,
+            "ZIP": row["ZIP"],
+            "EMAIL": emails,
+            "STATUS": 'SUCCESS'
+        }
+            rows.append(new_row)
+    except Exception as e:
         new_row = {
-        "FIRST_NAME": row["FIRST_NAME"],
-        "LAST_NAME": row["LAST_NAME"],
-        "STREET": row["STREET"],
-        "CITY": city,
-        "DIST": dist,
-        "ZIP": row["ZIP"],
-        "EMAIL": emails
-    }
+            "FIRST_NAME": row["FIRST_NAME"],
+            "LAST_NAME": row["LAST_NAME"],
+            "STREET": row["STREET"],
+            "CITY": city,
+            "DIST": dist,
+            "ZIP": row["ZIP"],
+            "EMAIL": [],
+            "STATUS": "ERROR"
+        }
         rows.append(new_row)
+
     df = pd.DataFrame(rows)
     if os.path.exists(result_excel_file_path):
         existing_df = pd.read_excel(
-            result_excel_file_path, names=["FIRST_NAME", "LAST_NAME", "STREET", "CITY", "DIST", "ZIP", "EMAIL"], engine="openpyxl"
+            result_excel_file_path, names=["FIRST_NAME", "LAST_NAME", "STREET", "CITY", "DIST", "ZIP", "EMAIL", "STATUS"], engine="openpyxl"
         )
         existing_df = pd.concat([existing_df, df], ignore_index=True)
         df = existing_df
@@ -228,3 +244,5 @@ def process_row(row, result_excel_file_path, log: logging):
     duplicated_rows = df.duplicated(subset=["FIRST_NAME", "LAST_NAME", "STREET", "CITY", "DIST", "ZIP"])
     df.loc[duplicated_rows, ["FIRST_NAME", "LAST_NAME", "STREET", "CITY", "DIST", "ZIP"]] = ""
     log.info(f"Saved to excel: {result_excel_file_path}")
+
+    return df

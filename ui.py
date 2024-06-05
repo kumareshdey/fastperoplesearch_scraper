@@ -1,5 +1,5 @@
 import threading
-import time
+import openpyxl
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import traceback
@@ -48,10 +48,10 @@ class TextHandler(logging.Handler):
 class ExcelProcessorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Excel Processor")
+        self.root.title("Fastpeoplesearch scraper")
 
         # Title
-        self.title_label = tk.Label(root, text="Excel Processor", font=("Arial", 24))
+        self.title_label = tk.Label(root, text="Fastpeoplesearch scraper", font=("Arial", 24))
         self.title_label.pack(pady=10)
 
         # Input for source Excel file
@@ -145,7 +145,18 @@ class ExcelProcessorApp:
             df.columns = ["FIRST_NAME", "LAST_NAME", "STREET", "CITY", "DIST", "ZIP"]
 
             for index, row in df.iterrows():
-                process_row(row, dest_file, self.logger)
+                df = process_row(row, dest_file, self.logger)
+                def show_try_again_popup():
+                    result = messagebox.askretrycancel("Error", "Updating excel could not be possible. Please close the file if you are viewing")
+                    return result
+
+                while True:
+                    try:
+                        df.to_excel(dest_file, index=False)
+                        break
+                    except:
+                        if not show_try_again_popup():
+                            continue
                 progress_percentage = (index + 1) / total_rows * 100
                 self.progress['value'] = progress_percentage
                 self.progress_label.config(text=f"{progress_percentage:.2f}% ({index + 1}/{total_rows})")
