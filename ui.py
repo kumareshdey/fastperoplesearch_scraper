@@ -6,6 +6,7 @@ import traceback
 import pandas as pd
 import logging
 from scraper import process_row
+import queue
 
 
 class Logger(tk.Frame):
@@ -46,7 +47,7 @@ class TextHandler(logging.Handler):
 
 
 class ExcelProcessorApp:
-    def __init__(self, root):
+    def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Fastpeoplesearch scraper")
 
@@ -109,6 +110,10 @@ class ExcelProcessorApp:
         ui_handler.setFormatter(formatter)
         self.logger.addHandler(ui_handler)
 
+        # Queue for communication between threads
+        self.queue = queue.Queue()
+        self.root.after(100, self.process_queue)
+
     def browse_source_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
         if file_path:
@@ -133,10 +138,10 @@ class ExcelProcessorApp:
 
     def process_excel_thread(self, source_file, dest_file):
         try:
-            self.submit_button.config(state='disabled')
-            self.progress['value'] = 0
-            self.progress_label.config(text="0% (0/0)")
-            self.logger.info("Starting Excel processing...")
+            self.queue.put(('submit_button', 'disabled'))
+            self.queue.put(('progress', 0))
+            self.queue.put(('progress_label', "0% (0/0)"))
+            self.logger.info(f"Starting Excel processing. Source path: {source_file}. Dest path: {dest_file}")
 
             # Read the source Excel file
             df = pd.read_excel(source_file)
@@ -146,33 +151,49 @@ class ExcelProcessorApp:
 
             for index, row in df.iterrows():
                 df = process_row(row, dest_file, self.logger)
-                def show_try_again_popup():
-                    result = messagebox.askretrycancel("Error", "Updating excel could not be possible. Please close the file if you are viewing")
-                    return result
 
                 while True:
                     try:
                         df.to_excel(dest_file, index=False)
                         break
-                    except:
-                        if not show_try_again_popup():
-                            continue
+                    except PermissionError:
+                        result = messagebox.askretrycancel("Error", "Updating excel could not be possible. Please close the file if you are viewing")
+                        if not result:
+                            raise
+
                 progress_percentage = (index + 1) / total_rows * 100
-                self.progress['value'] = progress_percentage
-                self.progress_label.config(text=f"{progress_percentage:.2f}% ({index + 1}/{total_rows})")
-                self.root.update_idletasks()
+                self.queue.put(('progress', progress_percentage))
+                self.queue.put(('progress_label', f"{progress_percentage:.2f}% ({index + 1}/{total_rows})"))
 
             self.logger.info("Excel processing completed.")
-            messagebox.showinfo("Info", "Excel processing completed successfully.")
+            self.queue.put(('messagebox', ('info', "Excel processing completed successfully.")))
         except Exception as e:
             self.logger.error("Error occurred: %s", str(e))
             self.logger.error(traceback.format_exc())
-            messagebox.showerror("Error", str(e))
+            self.queue.put(('messagebox', ('error', str(e))))
         finally:
-            self.submit_button.config(state='normal')
-            self.progress['value'] = 100
-            self.progress_label.config(text=f"100% ({total_rows}/{total_rows})")
-            self.root.quit()  # Close the program after completion
+            self.queue.put(('submit_button', 'normal'))
+            self.queue.put(('progress', 100))
+            self.queue.put(('progress_label', f"100% ({total_rows}/{total_rows})"))
+            self.queue.put(('quit',))
+
+    def process_queue(self):
+        while not self.queue.empty():
+            msg = self.queue.get()
+            if msg[0] == 'submit_button':
+                self.submit_button.config(state=msg[1])
+            elif msg[0] == 'progress':
+                self.progress['value'] = msg[1]
+            elif msg[0] == 'progress_label':
+                self.progress_label.config(text=msg[1])
+            elif msg[0] == 'messagebox':
+                if msg[1][0] == 'info':
+                    messagebox.showinfo("Info", msg[1][1])
+                elif msg[1][0] == 'error':
+                    messagebox.showerror("Error", msg[1][1])
+            elif msg[0] == 'quit':
+                self.root.quit()
+        self.root.after(100, self.process_queue)
 
 
 if __name__ == "__main__":
